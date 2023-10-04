@@ -26,6 +26,9 @@ import classifier_lib
 #----------------------------------------------------------------------------
 # Proposed EDM-G++ sampler.
 
+PRED_EPS = {}
+PRED_EPS_COR = {}
+
 def edm_sampler(
     boosting, time_min, time_max, vpsde, dg_weight_1st_order, dg_weight_2nd_order, discriminator,
     net, latents, class_labels=None, randn_like=torch.randn_like,
@@ -36,6 +39,8 @@ def edm_sampler(
     sigma_min = max(sigma_min, net.sigma_min)
     sigma_max = min(sigma_max, net.sigma_max)
 
+    dist.print0(f"heun sampler steps: {num_steps*2-1}")
+    
     # Time step discretization.
     step_indices = torch.arange(num_steps, dtype=torch.float64, device=latents.device)
     t_steps = (sigma_max ** (1 / rho) + step_indices / (num_steps - 1) * (sigma_min ** (1 / rho) - sigma_max ** (1 / rho))) ** rho
@@ -74,14 +79,6 @@ def edm_sampler(
         # Euler step.
         denoised = net(x_hat, t_hat, class_labels).to(torch.float64)
 
-        # epsilon scaling
-        eps_scaler_n = eps_scaler + kappa*i #NEW
-        #print(f'eps_scaler={eps_scaler_n}') #NEW
-        pred_eps = (x_hat - denoised) / t_hat[:, None, None, None]
-        #print(f'using scaler: "{eps_scaler_n}" at Euler step')
-        pred_eps = pred_eps / eps_scaler_n
-        denoised = x_hat - pred_eps * t_hat[:, None, None, None]
-
         d_cur = (x_hat - denoised) / t_hat[:, None, None, None]
         ## DG correction
         if dg_weight_1st_order != 0.:
@@ -92,15 +89,26 @@ def edm_sampler(
             d_cur += dg_weight_1st_order * (discriminator_guidance / t_hat[:, None, None, None])
         x_next = x_hat + (t_next - t_hat)[:, None, None, None] * d_cur
 
+        # compute the eps l2-norm for each image
+        pred_eps = d_cur
+        pred_eps = pred_eps.contiguous().cpu().numpy()
+        l2_norms = []
+        for n in range(pred_eps.shape[0]):
+            image = pred_eps[n, :, :, :]
+            image = image.reshape(3, -1)
+            l2_norm = np.linalg.norm(image, 'fro')
+            l2_norms.append(l2_norm)
+        eps_l2_norm = (sum(l2_norms) / len(l2_norms))
+        eps_l2_norm = np.array(eps_l2_norm).reshape([1])
+        if str(t_hat) in PRED_EPS.keys():
+            PRED_EPS[str(t_hat)] = np.concatenate((PRED_EPS[str(t_hat)], eps_l2_norm), axis=0)
+        else:
+            PRED_EPS[str(t_hat)] = eps_l2_norm
+        dist.print0(f"store eps L2-norm: {eps_l2_norm} at Euler {t_hat}")
+
         # Apply 2nd order correction.
         if i < num_steps - 1:
             denoised = net(x_next, t_next, class_labels).to(torch.float64)
-
-            # epsilon scaling
-            pred_eps = (x_next - denoised) / t_next
-            #print(f'using scaler: "{eps_scaler_n}" at correction step')
-            pred_eps = pred_eps / eps_scaler_n
-            denoised = x_next - pred_eps * t_next
 
             d_prime = (x_next - denoised) / t_next
             ## DG correction
@@ -108,6 +116,23 @@ def edm_sampler(
                 discriminator_guidance = classifier_lib.get_grad_log_ratio(discriminator, vpsde, x_next, t_next, net.img_resolution, time_min, time_max, class_labels, log=False)
                 d_prime += dg_weight_2nd_order * (discriminator_guidance / t_next)
             x_next = x_hat + (t_next - t_hat)[:, None, None, None] * (0.5 * d_cur + 0.5 * d_prime)
+
+            # compute the eps l2-norm for each image
+            pred_eps = d_prime
+            pred_eps = pred_eps.contiguous().cpu().numpy()
+            l2_norms = []
+            for n in range(pred_eps.shape[0]):
+                image = pred_eps[n, :, :, :]
+                image = image.reshape(3, -1)
+                l2_norm = np.linalg.norm(image, 'fro')
+                l2_norms.append(l2_norm)
+            eps_l2_norm = (sum(l2_norms) / len(l2_norms))
+            eps_l2_norm = np.array(eps_l2_norm).reshape([1])
+            if str(t_next) in PRED_EPS_COR.keys():
+                PRED_EPS_COR[str(t_next)] = np.concatenate((PRED_EPS_COR[str(t_next)], eps_l2_norm), axis=0)
+            else:
+                PRED_EPS_COR[str(t_next)] = eps_l2_norm
+            dist.print0(f"store eps L2-norm: {eps_l2_norm} at Correction {t_next}")
 
     return x_next
 
@@ -290,6 +315,19 @@ def main(boosting, time_min, time_max, dg_weight_1st_order, dg_weight_2nd_order,
             image_grid = make_grid(torch.tensor(images_np).permute(0, 3, 1, 2) / 255., nrow, padding=2)
             with tf.io.gfile.GFile(os.path.join(outdir, f"sample_{r}.png"), "wb") as fout:
                 save_image(image_grid, fout)
+
+    # L2-norm of eps
+    l2_norms_ls = []
+    for t in PRED_EPS:
+        l2_norms_ls.append(PRED_EPS[t].mean())
+        dist.print0(f"avg eps l2 norm at {t} euler step: {PRED_EPS[t].mean()}")
+    dist.print0(f"eps l2 norm: {np.array(l2_norms_ls[::-1]).tolist()}")
+
+    l2_norms_ls = []
+    for t in PRED_EPS_COR:
+        l2_norms_ls.append(PRED_EPS_COR[t].mean())
+        dist.print0(f"avg eps l2 norm at {t} correction step: {PRED_EPS_COR[t].mean()}")
+    dist.print0(f"eps l2 norm: {np.array(l2_norms_ls[::-1]).tolist()}")
     
     # Done.
     torch.distributed.barrier()
