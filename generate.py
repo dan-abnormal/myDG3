@@ -225,7 +225,7 @@ def ablation_sampler(
         # Increase noise temporarily.
         gamma = min(S_churn / num_steps, np.sqrt(2) - 1) if S_min <= sigma(t_cur) <= S_max else 0
         t_hat = sigma_inv(net.round_sigma(sigma(t_cur) + gamma * sigma(t_cur)))
-        x_hat = (s(t_hat) / s(t_cur))[:, None, None, None] * x_cur + (sigma(t_hat) ** 2 - sigma(t_cur) ** 2).clip(min=0).sqrt()[:, None, None, None] * s(t_hat)[:, None, None, None] * S_noise_vec_[:, None, None,None] * randn_like(x_cur)
+        x_hat = (s(t_hat) / s(t_cur))[:, None, None, None] * x_cur + (sigma(t_hat) ** 2 - sigma(t_cur) ** 2)[:, None, None, None].clip(min=0).sqrt() * s(t_hat)[:, None, None, None] * S_noise_vec_[:, None, None,None] * randn_like(x_cur)
 
         # Euler step.
         h = (t_next - t_hat)[:, None, None, None]
