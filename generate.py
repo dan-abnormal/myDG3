@@ -30,7 +30,7 @@ def edm_sampler(
     boosting, time_min, time_max, vpsde, dg_weight_1st_order, dg_weight_2nd_order, discriminator,
     net, latents, class_labels=None, randn_like=torch.randn_like,
     num_steps=18, sigma_min=0.002, sigma_max=80, rho=7,
-    S_churn=0, S_min=0, S_max=float('inf'), S_noise=1, eps_scaler=1.0, kappa=0.0
+    S_churn=0, S_min=0, S_max=float('inf'), S_noise=1, eps_scaler=1.0, kappa=0.0, use_adaptive_epsilon=False
 ):
     # Adjust noise levels based on what's supported by the network.
     sigma_min = max(sigma_min, net.sigma_min)
@@ -51,6 +51,8 @@ def edm_sampler(
     S_churn_max = torch.tensor([np.sqrt(2) - 1] * latents.shape[0], device=latents.device)
     S_noise_vec = torch.tensor([S_noise] * latents.shape[0], device=latents.device)
 
+    adaptive_epsilon = [0.999836130390629, 0.9997316492733852, 0.9998852784054134, 0.999748598108831, 0.999933508939097, 0.9997771417957395, 0.999909347705428, 0.9996936289624953, 0.9998549544309178, 0.9995377116962721, 1.0001027002453902, 0.9996423359221889, 1.0002271703366485, 0.9996512020242456, 1.0005516038915265, 0.9997683880570757, 1.0007592354353476, 0.9998706553542507, 1.0009719830382255, 0.9999836914997542, 1.0011614278898877, 1.0000419766584459, 1.0018026423972015, 0.9993621807175602, 1.003310258974448, 0.998397189672566, 1.0025984302254556, 0.9975275118372622, 0.9993462878537317, 0.9964199986700132, 0.9955108640410149, 1.0018367621355697, 1.0164579174074466, 1.0445461004970553, 1.091992458127279]
+    
     # Main sampling loop.
     x_next = latents.to(torch.float64) * t_steps[0]
     for i, (t_cur, t_next) in enumerate(zip(t_steps[:-1], t_steps[1:])): # 0, ..., N-1
@@ -74,8 +76,13 @@ def edm_sampler(
         # Euler step.
         denoised = net(x_hat, t_hat, class_labels).to(torch.float64)
 
-        # epsilon scaling
-        eps_scaler_n = eps_scaler + kappa*i #NEW
+        if(use_adaptive_epsilon):
+            eps_scaler_n = adaptive_epsilon[2*i]
+            print(eps_scaler_n)
+        else:
+            # epsilon scaling
+            eps_scaler_n = eps_scaler + kappa*i #NEW
+        
         #print(f'eps_scaler={eps_scaler_n}') #NEW
         pred_eps = (x_hat - denoised) / t_hat[:, None, None, None]
         #print(f'using scaler: "{eps_scaler_n}" at Euler step')
@@ -96,6 +103,8 @@ def edm_sampler(
         if i < num_steps - 1:
             denoised = net(x_next, t_next, class_labels).to(torch.float64)
 
+            if(use_adaptive_epsilon):
+                eps_scaler_n = adaptive_epsilon[2*i+1]
             # epsilon scaling
             pred_eps = (x_next - denoised) / t_next
             #print(f'using scaler: "{eps_scaler_n}" at correction step')
@@ -313,6 +322,7 @@ def parse_int_list(s):
 @click.option('--batch', 'max_batch_size',     help='Maximum batch size', metavar='INT',                                type=click.IntRange(min=1), default=100, show_default=True)
 @click.option('--eps_scaler', 'eps_scaler',help='epsilon scaler',         metavar='FLOAT',                          type=float, default=1.0, show_default=True)
 @click.option('--kappa', 'kappa',help='kappa',         metavar='FLOAT',                          type=float, default=0, show_default=True)
+@click.option('--use_adaptive_epsilon', 'use_adaptive_epsilon',help='use_adaptive_epsilon',         metavar='INT',    type=click.IntRange(min=0), default=0, show_default=True)
 
 @click.option('--steps', 'num_steps',      help='Number of sampling steps', metavar='INT',                          type=click.IntRange(min=1), default=18, show_default=True)
 @click.option('--sigma_min',               help='Lowest noise level  [default: varies]', metavar='FLOAT',           type=click.FloatRange(min=0, min_open=True))
@@ -350,7 +360,7 @@ def parse_int_list(s):
 ## Discriminator architecture
 @click.option('--cond',                    help='Is it conditional discriminator?', metavar='INT',                  type=click.IntRange(min=0, max=1), default=0, show_default=True)
 
-def main(boosting, time_min, time_max, dg_weight_1st_order, dg_weight_2nd_order, cond, pretrained_classifier_ckpt, discriminator_ckpt, save_type, max_batch_size, eps_scaler, kappa, do_seed, seed, num_samples, seeds, network_pkl, outdir, class_idx, device=torch.device('cuda'), **sampler_kwargs):
+def main(boosting, time_min, time_max, dg_weight_1st_order, dg_weight_2nd_order, cond, pretrained_classifier_ckpt, discriminator_ckpt, save_type, max_batch_size, eps_scaler, kappa, use_adaptive_epsilon, do_seed, seed, num_samples, seeds, network_pkl, outdir, class_idx, device=torch.device('cuda'), **sampler_kwargs):
     
     dist.init()
     num_batches = ((len(seeds) - 1) // (max_batch_size * dist.get_world_size()) + 1) * dist.get_world_size()
@@ -421,7 +431,7 @@ def main(boosting, time_min, time_max, dg_weight_1st_order, dg_weight_2nd_order,
         sampler_kwargs = {key: value for key, value in sampler_kwargs.items() if value is not None}
         have_ablation_kwargs = any(x in sampler_kwargs for x in ['solver', 'discretization', 'schedule', 'scaling'])
         sampler_fn = ablation_sampler if have_ablation_kwargs else edm_sampler
-        images = sampler_fn(boosting, time_min, time_max, vpsde, dg_weight_1st_order, dg_weight_2nd_order, discriminator, net, latents, class_labels, randn_like=rnd.randn_like, eps_scaler=eps_scaler, kappa=kappa, **sampler_kwargs)
+        images = sampler_fn(boosting, time_min, time_max, vpsde, dg_weight_1st_order, dg_weight_2nd_order, discriminator, net, latents, class_labels, randn_like=rnd.randn_like, eps_scaler=eps_scaler, kappa=kappa, use_adaptive_epsilon=use_adaptive_epsilon, **sampler_kwargs)
 
         ## Save images.
         images_np = (images * 127.5 + 128).clip(0, 255).to(torch.uint8).permute(0, 2, 3, 1).cpu().numpy()
