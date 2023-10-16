@@ -291,7 +291,7 @@ def main(boosting, time_min, time_max, dg_weight_1st_order, dg_weight_2nd_order,
 
         ## Generate images.
         sampler_kwargs = {key: value for key, value in sampler_kwargs.items() if value is not None}
-        images = edm_sampler(boosting, time_min, time_max, vpsde, dg_weight_1st_order, dg_weight_2nd_order, discriminator, net, latents, class_labels, randn_like=rnd.randn_like, eps_scaler=eps_scaler, kappa=kappa, use_euler, **sampler_kwargs)
+        images = edm_sampler(boosting, time_min, time_max, vpsde, dg_weight_1st_order, dg_weight_2nd_order, discriminator, net, latents, class_labels, randn_like=rnd.randn_like, eps_scaler=eps_scaler, kappa=kappa, use_euler=use_euler, **sampler_kwargs)
 
         ## Save images.
         images_np = (images * 127.5 + 128).clip(0, 255).to(torch.uint8).permute(0, 2, 3, 1).cpu().numpy()
