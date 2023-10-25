@@ -87,14 +87,6 @@ def edm_sampler(
         denoised = x_hat - pred_eps * t_hat[:, None, None, None]
         
         d_cur = (x_hat - denoised) / t_hat[:, None, None, None]
-        ## DG correction
-        if dg_weight_1st_order != 0.:
-            discriminator_guidance, log_ratio = classifier_lib.get_grad_log_ratio(discriminator, vpsde, x_hat, t_hat, net.img_resolution, time_min, time_max, class_labels, log=True)
-            if boosting:
-                if i % period_weight == 0:
-                    discriminator_guidance[log_ratio < 0.] *= 2.
-            d_cur += dg_weight_1st_order * (discriminator_guidance / t_hat[:, None, None, None])
-        x_next = x_hat + (t_next - t_hat)[:, None, None, None] * d_cur
 
         # compute the eps l2-norm for each image
         pred_eps = d_cur
@@ -112,6 +104,15 @@ def edm_sampler(
         else:
             PRED_EPS[str(t_hat)] = eps_l2_norm
         dist.print0(f"store eps L2-norm: {eps_l2_norm} at Euler {t_hat}")
+        
+        ## DG correction
+        if dg_weight_1st_order != 0.:
+            discriminator_guidance, log_ratio = classifier_lib.get_grad_log_ratio(discriminator, vpsde, x_hat, t_hat, net.img_resolution, time_min, time_max, class_labels, log=True)
+            if boosting:
+                if i % period_weight == 0:
+                    discriminator_guidance[log_ratio < 0.] *= 2.
+            d_cur += dg_weight_1st_order * (discriminator_guidance / t_hat[:, None, None, None])
+        x_next = x_hat + (t_next - t_hat)[:, None, None, None] * d_cur
 
         # Apply 2nd order correction.
         if i < num_steps - 1 and not use_euler:
@@ -124,11 +125,6 @@ def edm_sampler(
             denoised = x_next - pred_eps * t_next
             
             d_prime = (x_next - denoised) / t_next
-            ## DG correction
-            if dg_weight_2nd_order != 0.:
-                discriminator_guidance = classifier_lib.get_grad_log_ratio(discriminator, vpsde, x_next, t_next, net.img_resolution, time_min, time_max, class_labels, log=False)
-                d_prime += dg_weight_2nd_order * (discriminator_guidance / t_next)
-            x_next = x_hat + (t_next - t_hat)[:, None, None, None] * (0.5 * d_cur + 0.5 * d_prime)
 
             # compute the eps l2-norm for each image
             pred_eps = d_prime
@@ -146,6 +142,12 @@ def edm_sampler(
             else:
                 PRED_EPS_COR[str(t_next)] = eps_l2_norm
             dist.print0(f"store eps L2-norm: {eps_l2_norm} at Correction {t_next}")
+            
+            ## DG correction
+            if dg_weight_2nd_order != 0.:
+                discriminator_guidance = classifier_lib.get_grad_log_ratio(discriminator, vpsde, x_next, t_next, net.img_resolution, time_min, time_max, class_labels, log=False)
+                d_prime += dg_weight_2nd_order * (discriminator_guidance / t_next)
+            x_next = x_hat + (t_next - t_hat)[:, None, None, None] * (0.5 * d_cur + 0.5 * d_prime)
 
     return x_next
 
