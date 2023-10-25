@@ -79,6 +79,13 @@ def edm_sampler(
         # Euler step.
         denoised = net(x_hat, t_hat, class_labels).to(torch.float64)
 
+        eps_scaler_n = eps_scaler + kappa*i #NEW
+        #print(f'eps_scaler={eps_scaler_n}') #NEW
+        pred_eps = (x_hat - denoised) / t_hat[:, None, None, None]
+        #print(f'using scaler: "{eps_scaler_n}" at Euler step')
+        pred_eps = pred_eps / eps_scaler_n
+        denoised = x_hat - pred_eps * t_hat[:, None, None, None]
+        
         d_cur = (x_hat - denoised) / t_hat[:, None, None, None]
         ## DG correction
         if dg_weight_1st_order != 0.:
@@ -110,6 +117,12 @@ def edm_sampler(
         if i < num_steps - 1 and not use_euler:
             denoised = net(x_next, t_next, class_labels).to(torch.float64)
 
+            # epsilon scaling
+            pred_eps = (x_next - denoised) / t_next
+            #print(f'using scaler: "{eps_scaler_n}" at correction step')
+            pred_eps = pred_eps / eps_scaler_n
+            denoised = x_next - pred_eps * t_next
+            
             d_prime = (x_next - denoised) / t_next
             ## DG correction
             if dg_weight_2nd_order != 0.:
