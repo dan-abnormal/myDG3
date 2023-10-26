@@ -28,7 +28,7 @@ PRED_EPS_COR = {}
 def edm_sampler(
     net, latents, class_labels=None, randn_like=torch.randn_like,
     num_steps=18, sigma_min=0.002, sigma_max=80, rho=7,
-    S_churn=0, S_min=0, S_max=float('inf'), S_noise=1, eps_scaler
+    S_churn=0, S_min=0, S_max=float('inf'), S_noise=1, eps_scaler=1.0
 ):
     # Adjust noise levels based on what's supported by the network.
     sigma_min = max(sigma_min, net.sigma_min)
