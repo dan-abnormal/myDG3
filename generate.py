@@ -82,14 +82,18 @@ def edm_sampler(
         eps_scaler_n = eps_scaler + kappa*i #NEW
         #print(f'eps_scaler={eps_scaler_n}') #NEW
         pred_eps = (x_hat - denoised) / t_hat[:, None, None, None]
+        print(f'pred_eps 1: {pred_eps}')
         #print(f'using scaler: "{eps_scaler_n}" at Euler step')
         pred_eps = pred_eps / eps_scaler_n
+        print(f'pred_eps 2: {pred_eps}')
         denoised = x_hat - pred_eps * t_hat[:, None, None, None]
         
         d_cur = (x_hat - denoised) / t_hat[:, None, None, None]
 
         # compute the eps l2-norm for each image
         pred_eps = d_cur
+        print(f'pred_eps 3: {pred_eps}')
+        print(f'pred_eps 3 shape: {pred_eps.shape}')
         pred_eps = pred_eps.contiguous().cpu().numpy()
         l2_norms = []
         for n in range(pred_eps.shape[0]):
