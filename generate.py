@@ -209,6 +209,12 @@ def ablation_sampler(
         h = t_next - t_hat
         denoised = net(x_hat / s(t_hat), sigma(t_hat), class_labels).to(torch.float64)
 
+        # epsilon scaling
+        pred_eps = (x_hat - denoised) / sigma(t_hat)
+        dist.print0(f'ablation sampler: using scaler {eps_scaler} at Euler step')
+        pred_eps = pred_eps / eps_scaler
+        denoised = x_hat - pred_eps * sigma(t_hat)
+
         # compute the eps l2-norm for each image
         pred_eps = (x_hat / s(t_hat) - denoised) / sigma(t_hat)
         pred_eps = pred_eps.contiguous().cpu().numpy()
