@@ -91,7 +91,7 @@ def edm_sampler(
         d_cur = (x_hat - denoised) / t_hat[:, None, None, None]
 
         # compute the eps l2-norm for each image
-        pred_eps = d_cur
+        #pred_eps = d_cur
         print(f'pred_eps 3: {pred_eps}')
         print(f'pred_eps 3 shape: {pred_eps.shape}')
         pred_eps = pred_eps.contiguous().cpu().numpy()
